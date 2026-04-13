@@ -286,6 +286,9 @@ def parse_handle_request(request_data, client_address):
         response_headers["Content-Length"] = len(response_body)
         response_headers["Date"] = get_response_date()
 
+        if not status:
+            status = "200 OK"
+
         response = build_response(status,
                                   response_headers,
                                   response_body)
@@ -328,9 +331,10 @@ def get_range_content(given_range, range_units, file_content):
             # An origin server MUST ignore a Range header field that contains a range unit it does not understand.
             return "", ""
         try:
+            # A server that supports range requests MAY ignore or reject a Range header field that contains an invalid ranges-specifier
             start_range, end_range = given_range.split("-", 1)
         except Exception:
-            return "", "400 Bad Request"
+            return "", ""
 
         start_range = start_range.strip()
         end_range = end_range.strip()
@@ -354,7 +358,8 @@ def get_range_content(given_range, range_units, file_content):
                 return "", "416 Range Not Satisfiable"
             return file_content[start_range:end_range + 1] + "\r\n", ""
 
-        return "", "400 Bad Request"
+        # A server that supports range requests MAY ignore or reject a Range header field that contains an invalid ranges-specifier
+        return "", ""
 
     except Exception:
         return "", "500 Internal Server Error"
