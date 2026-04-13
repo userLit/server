@@ -4,6 +4,7 @@ import socket
 import string
 from datetime import datetime, timezone
 import mysql.connector
+from server_response import ServerResponse
 
 
 HOST = "0.0.0.0"
@@ -70,17 +71,13 @@ def handle_client(client_socket, client_address):
 
 
 def parse_handle_request(request_data, client_address):
-    try:
-        status = "200 OK"
-        log = ""
-        response_headers = {
-            "Date": 0,
-            "Connection": "close",
-            "Content-Length": 0
-        }
-        is_not_modified = False
-        is_unmodified = False
+    log = ""
+    server_response = ServerResponse()
 
+    is_not_modified = False
+    is_unmodified = False
+
+    try:
         try:
             start_line, headers_with_body = request_data.split("\r\n", 1)
 
@@ -89,28 +86,19 @@ def parse_handle_request(request_data, client_address):
             request_path = request_path.strip()
             request_protocol = request_protocol.upper().strip()
         except Exception:
-            response_headers["Date"] = get_response_date()
-            response = build_response("400 Bad Request",
-                                      response_headers,
-                                      "")
-            log = response
-            return response, f"client {client_address} has recieved an error: {log}"
+            server_response.status = "400 Bad Request"
+            response = server_response.build_response()
+            return response, f"client {client_address} has recieved an error: {response}"
 
         if request_protocol != "HTTP/1.1":
-            response_headers["Date"] = get_response_date()
-            response = build_response("505 HTTP Version Not Supported",
-                                      response_headers,
-                                      "")
-            log = response
-            return response, f"client {client_address} has recieved an error: {log}"
+            server_response.status = "505 HTTP Version Not Supported"
+            response = server_response.build_response()
+            return response, f"client {client_address} has recieved an error: {response}"
 
         if request_method != "GET":
-            response_headers["Date"] = get_response_date()
-            response = build_response("405 Method Not Allowed",
-                                      response_headers,
-                                      "")
-            log = response
-            return response, f"client {client_address} has recieved an error: {log}"
+            server_response.status = "405 Method Not Allowed"
+            response = server_response.build_response()
+            return response, f"client {client_address} has recieved an error: {response}"
 
         # check if path exists
         if request_path == "/":
@@ -119,12 +107,9 @@ def parse_handle_request(request_data, client_address):
         absolute_request_path = ABSOLUTE_SITE_DIRECTORY_PATH + "\\" + request_path
 
         if not os.path.isfile(absolute_request_path) or os.path.dirname(absolute_request_path) != ABSOLUTE_SITE_DIRECTORY_PATH:
-            response_headers["Date"] = get_response_date()
-            response = build_response("404 Not Found",
-                                      response_headers,
-                                      "")
-            log = response
-            return response, f"client {client_address} has recieved an error: {log}"
+            server_response.status = "404 Not Found"
+            response = server_response.build_response()
+            return response, f"client {client_address} has recieved an error: {response}"
 
         # check headers and build response
         file_content = open(absolute_request_path).read()
@@ -139,12 +124,9 @@ def parse_handle_request(request_data, client_address):
         try:
             headers, body = headers_with_body.split("\r\n\r\n", 1)
         except Exception:
-            response_headers["Date"] = get_response_date()
-            response = build_response("400 Bad Request",
-                                      response_headers,
-                                      "")
-            log = response
-            return response, f"client {client_address} has recieved an error: {log}"
+            server_response.status = "400 Bad Request"
+            response = server_response.build_response()
+            return response, f"client {client_address} has recieved an error: {response}"
 
         headers = headers.split("\r\n")
         is_host_exist = False
@@ -152,19 +134,16 @@ def parse_handle_request(request_data, client_address):
             try:
                 header_name, header_value = header.split(":", 1)
             except Exception:
-                response_headers["Date"] = get_response_date()
-                response = build_response("400 Bad Request",
-                                          response_headers,
-                                          "")
-                log = response
-                return response, f"client {client_address} has recieved an error: {log}"
+                server_response.status = "400 Bad Request"
+                response = server_response.build_response()
+                return response, f"client {client_address} has recieved an error: {response}"
 
             header_name = header_name.upper()
             header_value = header_value.strip()
 
             if header_name in ["DATE", "USER-AGENT"]:
                 if header_name == "DATE":
-                    if is_valid_http_date(header_value):
+                    if not is_valid_http_date(header_value):
                         continue
                 log += header_name + ": " + header_value + "\n"
 
@@ -179,15 +158,12 @@ def parse_handle_request(request_data, client_address):
                 http_if_modified_since = datetime.strptime(header_value, "%a, %d %b %Y %H:%M:%S GMT")
 
                 if http_if_modified_since < last_modified:
-                    response_headers["Last-Modified"] = file_last_modified
-                    response_headers["Date"] = get_response_date()
-                    response = build_response("412 Precondition Failed",
-                                              response_headers,
-                                              "")
-                    log = response
-                    return response, f"client {client_address} has recieved an error: {log}"
+                    server_response.headers["Last-Modified"] = file_last_modified
+                    server_response.status = "412 Precondition Failed"
+                    response = server_response.build_response()
+                    return response, f"client {client_address} has recieved an error: {response}"
                 else:
-                    status = "200 OK"
+                    server_response.status = "200 OK"
                     continue
 
             if header_name == "IF-MODIFIED-SINCE" and not is_unmodified:
@@ -199,10 +175,10 @@ def parse_handle_request(request_data, client_address):
                 http_if_modified_since = datetime.strptime(header_value, "%a, %d %b %Y %H:%M:%S GMT")
 
                 if http_if_modified_since < last_modified:
-                    status = "200 OK"
+                    server_response.status = "200 OK"
                     continue
                 else:
-                    status = "304 Not Modified"
+                    server_response.status = "304 Not Modified"
                     is_not_modified = True
                     continue
 
@@ -222,15 +198,12 @@ def parse_handle_request(request_data, client_address):
                             continue
 
                         if status: # error
-                            response_headers["Date"] = get_response_date()
-                            response = build_response(status,
-                                                      response_headers,
-                                                      "")
-                            log = response
-                            return response, f"client {client_address} has recieved an error: {log}"
+                            server_response.status = status
+                            response = server_response.build_response()
+                            return response, f"client {client_address} has recieved an error: {response}"
 
-                        response_headers["Content-Range"] = f"{ranges[0]}/{len(file_content)}"
-                        status = "206 Partial Content"
+                        server_response.headers["Content-Range"] = f"{ranges[0]}/{len(file_content)}"
+                        server_response.status = "206 Partial Content"
                         response_body = range_content
 
                     else:
@@ -243,78 +216,47 @@ def parse_handle_request(request_data, client_address):
                             if not status and not range_content: # ignore header
                                 continue
                             if status: # error
-                                response_headers["Date"] = get_response_date()
-                                response = build_response(status,
-                                                          response_headers,
-                                                          "")
-                                log = response
-                                return response, f"client {client_address} has recieved an error: {log}"
+                                server_response.status = status
+                                response = server_response.build_response()
+                                return response, f"client {client_address} has recieved an error: {response}"
 
                             response_body += f"--{string_separator}\r\nContent-Range: bytes {current_range}/{len(file_content)}\r\n\r\n{range_content}\r\n"
 
                         response_body += f"--{string_separator}--\r\n"
-                        response_headers["Content-Type"] = f"multipart/byteranges; boundary={string_separator}"
-                        status = "206 Partial Content"
+                        server_response.headers["Content-Type"] = f"multipart/byteranges; boundary={string_separator}"
+                        server_response.status = "206 Partial Content"
 
                     log += header_name + ": " + header_value + "\n"
 
                 except Exception:
-                    response_headers["Date"] = get_response_date()
-                    response = build_response("400 Bad Request",
-                                              response_headers,
-                                              "")
-                    log = response
-                    return response, f"client {client_address} has recieved an error: {log}"
+                    server_response.status = "400 Bad Request"
+                    response = server_response.build_response()
+                    return response, f"client {client_address} has recieved an error: {response}"
 
             if header_name == "HOST":
                 is_host_exist = True
 
         if not is_host_exist:
-            response_headers["Date"] = get_response_date()
-            response = build_response("400 Bad Request",
-                                      response_headers,
-                                      "")
-            log = response
-            return response, f"client {client_address} has recieved an error: {log}"
+            server_response.status = "400 Bad Request"
+            response = server_response.build_response()
+            return response, f"client {client_address} has recieved an error: {response}"
 
         if file_last_modified:
-            response_headers["Last-Modified"] = file_last_modified
+            server_response.headers["Last-Modified"] = file_last_modified
+
+        server_response.body = response_body
         # success
         if is_not_modified and not is_unmodified:
-            response_body = ""
+            server_response.body = ""
 
-        response_headers["Content-Length"] = len(response_body)
-        response_headers["Date"] = get_response_date()
+        response = server_response.build_response()
 
-        if not status:
-            status = "200 OK"
-
-        response = build_response(status,
-                                  response_headers,
-                                  response_body)
-
-        return response, f"client {client_address} has connected with headers: {log}, and received status {status}"
+        return response, f"client {client_address} has connected with headers: {log}, and received status {server_response.status}"
 
     except Exception:
-        response_headers["Date"] = get_response_date()
-        response = build_response("500 Internal Server Error",
-                                  response_headers,
-                                  "")
-        log = response
-
-    return response, f"client {client_address} has recieved an error: {log}"
-
-
-def build_response(status, headers, body):
-    response = f"HTTP/1.1 {status}\r\n"
-    for key, value in headers.items():
-        response += f"{key}: {value}\r\n"
-    response += f"\r\n{body}"
-    return response
-
-
-def get_response_date():
-    return datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        server_response.status = "500 Internal Server Error"
+        response = server_response.build_response()
+        return response, f"client {client_address} has recieved an error: {response}"
 
 
 def is_valid_http_date(date):
