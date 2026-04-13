@@ -149,7 +149,16 @@ def parse_handle_request(request_data, client_address):
         headers = headers.split("\r\n")
         is_host_exist = False
         for header in headers:
-            header_name, header_value = header.split(":", 1)
+            try:
+                header_name, header_value = header.split(":", 1)
+            except Exception:
+                response_headers["Date"] = get_response_date()
+                response = build_response("400 Bad Request",
+                                          response_headers,
+                                          "")
+                log = response
+                return response, f"client {client_address} has recieved an error: {log}"
+
             header_name = header_name.upper()
             header_value = header_value.strip()
 
@@ -208,7 +217,6 @@ def parse_handle_request(request_data, client_address):
                         # If a single part is being transferred,
                         # the server generating the 206 response MUST generate a Content-Range header field,
                         # describing what range of the selected representation is enclosed, and a payload consisting of the range.
-                        response_headers["Content-Range"] = f"{ranges[0]}/{len(file_content)}"
                         range_content, status = get_range_content(ranges[0], range_units, file_content)
                         if not status and not range_content: # ignore header
                             continue
@@ -220,6 +228,8 @@ def parse_handle_request(request_data, client_address):
                                                       "")
                             log = response
                             return response, f"client {client_address} has recieved an error: {log}"
+
+                        response_headers["Content-Range"] = f"{ranges[0]}/{len(file_content)}"
                         status = "206 Partial Content"
                         response_body = range_content
 
