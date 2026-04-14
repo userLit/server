@@ -53,8 +53,9 @@ def handle_client(client_socket, client_address):
 
     print(f"Received: \n{request_data}")
 
-    response, log = parse_handle_request(request_data, client_address)
-    client_socket.send(response.encode())
+    server_response = parse_handle_request(request_data, client_address)
+    response = server_response.build_response()
+    client_socket.send(response)
     print(f"Sent: \n{response}")
 
     try:
@@ -71,7 +72,6 @@ def handle_client(client_socket, client_address):
 
 
 def parse_handle_request(request_data, client_address):
-    log = ""
     server_response = ServerResponse()
 
     is_not_modified = False
@@ -87,18 +87,15 @@ def parse_handle_request(request_data, client_address):
             request_protocol = request_protocol.upper().strip()
         except Exception:
             server_response.status = "400 Bad Request"
-            response = server_response.build_response()
-            return response, f"client {client_address} has recieved an error: {response}"
+            return server_response
 
         if request_protocol != "HTTP/1.1":
             server_response.status = "505 HTTP Version Not Supported"
-            response = server_response.build_response()
-            return response, f"client {client_address} has recieved an error: {response}"
+            return server_response
 
         if request_method != "GET":
             server_response.status = "405 Method Not Allowed"
-            response = server_response.build_response()
-            return response, f"client {client_address} has recieved an error: {response}"
+            return server_response
 
         # check if path exists
         if request_path == "/":
@@ -108,11 +105,10 @@ def parse_handle_request(request_data, client_address):
 
         if not os.path.isfile(absolute_request_path) or os.path.dirname(absolute_request_path) != ABSOLUTE_SITE_DIRECTORY_PATH:
             server_response.status = "404 Not Found"
-            response = server_response.build_response()
-            return response, f"client {client_address} has recieved an error: {response}"
+            return server_response
 
         # check headers and build response
-        file_content = open(absolute_request_path).read()
+        file_content = open(absolute_request_path, "rb").read()
         response_body = file_content
 
         try:
@@ -125,8 +121,7 @@ def parse_handle_request(request_data, client_address):
             headers, body = headers_with_body.split("\r\n\r\n", 1)
         except Exception:
             server_response.status = "400 Bad Request"
-            response = server_response.build_response()
-            return response, f"client {client_address} has recieved an error: {response}"
+            return server_response
 
         headers = headers.split("\r\n")
         is_host_exist = False
@@ -135,8 +130,7 @@ def parse_handle_request(request_data, client_address):
                 header_name, header_value = header.split(":", 1)
             except Exception:
                 server_response.status = "400 Bad Request"
-                response = server_response.build_response()
-                return response, f"client {client_address} has recieved an error: {response}"
+                return server_response
 
             header_name = header_name.upper()
             header_value = header_value.strip()
@@ -145,7 +139,7 @@ def parse_handle_request(request_data, client_address):
                 if header_name == "DATE":
                     if not is_valid_http_date(header_value):
                         continue
-                log += header_name + ": " + header_value + "\n"
+                server_response.log_headers += header_name + ": " + header_value + "\n"
 
             # if unmodified is checked before is modified
             if header_name == "IF-UNMODIFIED-SINCE":
@@ -160,8 +154,7 @@ def parse_handle_request(request_data, client_address):
                 if http_if_modified_since < last_modified:
                     server_response.headers["Last-Modified"] = file_last_modified
                     server_response.status = "412 Precondition Failed"
-                    response = server_response.build_response()
-                    return response, f"client {client_address} has recieved an error: {response}"
+                    return server_response
                 else:
                     server_response.status = "200 OK"
                     continue
@@ -217,8 +210,7 @@ def parse_handle_request(request_data, client_address):
                                 continue
                             if status: # error
                                 server_response.status = status
-                                response = server_response.build_response()
-                                return response, f"client {client_address} has recieved an error: {response}"
+                                return server_response
 
                             response_body += f"--{string_separator}\r\nContent-Range: bytes {current_range}/{len(file_content)}\r\n\r\n{range_content}\r\n"
 
@@ -226,20 +218,18 @@ def parse_handle_request(request_data, client_address):
                         server_response.headers["Content-Type"] = f"multipart/byteranges; boundary={string_separator}"
                         server_response.status = "206 Partial Content"
 
-                    log += header_name + ": " + header_value + "\n"
+                    server_response.log_headers += header_name + ": " + header_value + "\n"
 
                 except Exception:
                     server_response.status = "400 Bad Request"
-                    response = server_response.build_response()
-                    return response, f"client {client_address} has recieved an error: {response}"
+                    return server_response
 
             if header_name == "HOST":
                 is_host_exist = True
 
         if not is_host_exist:
             server_response.status = "400 Bad Request"
-            response = server_response.build_response()
-            return response, f"client {client_address} has recieved an error: {response}"
+            return server_response
 
         if file_last_modified:
             server_response.headers["Last-Modified"] = file_last_modified
@@ -249,14 +239,11 @@ def parse_handle_request(request_data, client_address):
         if is_not_modified and not is_unmodified:
             server_response.body = ""
 
-        response = server_response.build_response()
-
-        return response, f"client {client_address} has connected with headers: {log}, and received status {server_response.status}"
+        return server_response
 
     except Exception:
         server_response.status = "500 Internal Server Error"
-        response = server_response.build_response()
-        return response, f"client {client_address} has recieved an error: {response}"
+        return server_response
 
 
 def is_valid_http_date(date):
